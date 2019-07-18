@@ -3169,6 +3169,13 @@ static const AVCodecDescriptor codec_descriptors[] = {
         .props     = AV_CODEC_PROP_TEXT_SUB,
         .profiles  = NULL_IF_CONFIG_SMALL(ff_arib_caption_profiles),
     },
+    {
+        .id        = AV_CODEC_ID_DICOM,
+        .type      = AVMEDIA_TYPE_VIDEO,
+        .name      = "dicom",
+        .long_name = NULL_IF_CONFIG_SMALL("DICOM (Digital Imaging and Communications in Medicine)"),
+        .props     = AV_CODEC_PROP_LOSSY | AV_CODEC_PROP_LOSSLESS,
+    },
 
     /* other kind of codecs and pseudo-codecs */
     {
