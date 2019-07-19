@@ -659,7 +659,7 @@ int dicom_dict_find_elem_info(DataElement *de) {
         return -2;
     len = sizeof(dicom_dictionary) / sizeof(dicom_dictionary[0]);
     for (int i = 0; i < len; i++) {
-        if (de->GroupNumber == dicom_dictionary[i].GroupNumber 
+        if (de->GroupNumber == dicom_dictionary[i].GroupNumber
             && de->ElementNumber == dicom_dictionary[i].ElementNumber) {
             de->VR = dicom_dictionary[i].vr;
             return 0;

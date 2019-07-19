@@ -40,10 +40,10 @@ typedef struct DICOMContext {
     uint16_t rows;
     uint16_t columns;
     uint32_t nb_DEs;
+    TransferSyntax transfer_syntax;
     int window;
     int level;
     int metadata;
-    char *transer_syntext_uid;
 } DICOMContext;
 
 
@@ -123,6 +123,7 @@ static int read_data_element_metainfo(AVFormatContext *s, DataElement *de)
 {
     ValueRepresentation vr;
     int ret;
+    int bytes_read = 0;
 
     ret = avio_rl16(s->pb);
     if (ret < 0)
@@ -133,7 +134,7 @@ static int read_data_element_metainfo(AVFormatContext *s, DataElement *de)
 
     vr = avio_rb16(s->pb); // Stored in Big Endian in dicom.h
     de->VR = vr;
-
+    bytes_read += 6;
     switch (vr) {
         case OB:
         case OD:
@@ -150,16 +151,18 @@ static int read_data_element_metainfo(AVFormatContext *s, DataElement *de)
         case UV:
             avio_skip(s->pb, 2); // Padding always 0x0000
             de->VL = avio_rl32(s->pb);
+            bytes_read += 6;
             if (de->VL % 2)
                 av_log(s, AV_LOG_WARNING,"Data Element Value length:%d can't be odd\n", de->VL);
             break;
         default:
             de->VL = avio_rl16(s->pb);
+            bytes_read += 2;
             if (de->VL % 2)
                 av_log(s, AV_LOG_WARNING,"Data Element Value length:%d can't be odd\n", de->VL);
             break;
     }
-    return de->VL;
+    return bytes_read;
 }
 
 static int read_data_element_valuefield(AVFormatContext *s, DataElement *de)
@@ -205,15 +208,73 @@ static int print_data_element_value(AVFormatContext *s, DataElement *de) {
     return 0;
 }
 
+static char *get_key_str(DataElement *de) {
+    char *key;
+    if (!de->GroupNumber || !de->ElementNumber)
+        return 0;
+    key = (char *) av_malloc(10);
+    sprintf(key, "%04x,%04x", de->GroupNumber, de->ElementNumber);
+    key[9] = 0;
+    return key;
+}
+
+// detects transfer syntax
+static TransferSyntax get_transfer_sytax (const char *ts) {
+    if (!strcmp(ts, "1.2.840.10008.1.2"))
+        return IMPLICIT_VR;
+    else if (!strcmp(ts, "1.2.840.10008.1.2.1"))
+        return EXPLICIT_VR;
+    else
+        return UNSUPPORTED_TS;
+}
+
 static int dicom_read_header(AVFormatContext *s)
 {
-    AVIOContext     *pb = s->pb;
+    AVIOContext  *pb = s->pb;
+    AVDictionary **m = &s->metadata;
+    DICOMContext *dicom = s->priv_data;
+    DataElement *de;
+    char *key;
+    char *value;
+    uint32_t header_size;
+    uint32_t bytes_read = 0;
     int ret;
 
     ret = avio_skip(pb, DICOM_PREAMBLE_SIZE + DICOM_PREFIX_SIZE);
     if (ret < 0)
         return ret;
-
+    de = av_malloc(sizeof(DataElement));
+    ret = read_data_element_metainfo(s, de);
+    ret = read_data_element_valuefield(s, de);
+    if (ret < 0)
+        return ret;
+    if (de->GroupNumber != 0x02 || de->ElementNumber != 0x00) {
+        av_log(s, AV_LOG_WARNING,"First data element is not \'File MetaInfo Group Length\'");
+        header_size = 200; // Fallback to default length
+    } else {
+        header_size = *(uint32_t *)de->bytes;
+    }
+    while(bytes_read < header_size) {
+        de = av_malloc(sizeof(DataElement));
+        ret = read_data_element_metainfo(s, de);
+        if (ret < 0)
+            return ret;
+        bytes_read += ret;
+        key = get_key_str(de);
+        ret = read_data_element_valuefield(s, de);
+        if (ret < 0)
+            return ret;
+        bytes_read += ret;
+        value = (char *) de->bytes;
+        value = av_malloc(de->VL + 1);
+        memcpy(value, de->bytes, de->VL);
+        value[de->VL] = 0;
+        if (de->GroupNumber == TS_GR_NB && de->ElementNumber == TS_EL_NB) {
+            dicom->transfer_syntax = get_transfer_sytax(value);
+        }
+        av_dict_set(m, key, value, AV_DICT_DONT_STRDUP_KEY | AV_DICT_DONT_STRDUP_VAL);
+        av_free(de);
+    }
     s->ctx_flags |= AVFMTCTX_NOHEADER;
     s->start_time = 0;
     return 0;

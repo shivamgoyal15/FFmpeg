@@ -27,10 +27,26 @@
 #define IMAGE_GR_NB 0x0028
 #define PIXEL_GR_NB 0x7FE0
 #define PIXELDATA_EL_NB 0x0010
-#define TRANSFER_SYNTEX_UID_GR_NB 0x0002
-#define TRANSFER_SYNTEX_UID_EL_NB 0x0010
+#define TS_GR_NB 0x0002
+#define TS_EL_NB 0x0010
 #define DEFAULT_WINDOW 1100
 #define DEFAULT_LEVEL 125
+
+typedef enum {
+    UNSUPPORTED_TS = 0,
+    IMPLICIT_VR = 1,
+    EXPLICIT_VR = 2,
+    DEFLATE_EXPLICIT_VR = 3,
+    JPEG_BASE_8 = 4,
+    JPEG_EXT_12 = 5,
+    JPEG_LOSSLESS_NH_P14 = 6,
+    JPEG_LOSSLESS_NH_P14_S1 = 7,
+    JPEG_LS_LOSSLESS = 8,
+    JPEG_LS_LOSSY = 9,
+    JPEG2000_LOSSLESS = 10,
+    JPEG2000 = 11,
+    RLE = 12
+} TransferSyntax;
 
 typedef enum {
     AE = 0x4145,
