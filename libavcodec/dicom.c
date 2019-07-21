@@ -20,34 +20,81 @@
  */
 
 #include <inttypes.h>
-
+#include "libavutil/dict.h"
 #include "avcodec.h"
 #include "bytestream.h"
 #include "bmp.h"
 #include "internal.h"
 
 
-static void apply_window_level(short * vals, uint8_t *ptr, int window, int level, int bitmask, int size)
+static uint8_t apply_window_level(int64_t val, int window, int level, int bitmask, int type)
 {
-    int i, max, min;
-    short val;
+    int max, min;
+    uint8_t ret;
 
     max = level + window / 2;
     min = level - window / 2;
+    if (val > max && type == 2)
+        ret = 255;
+    else if (val < min && type == 2)
+        ret = 0;
+    else
+        ret = ((val & bitmask) - min) * 255 / (max - min);
+    if (type == 0x01) // Monochrome1
+        ret = 255 - ret;
+    return ret;
+}
 
-    for (i = 0; i < size; i++){
-        val = vals[i];
+// DICOM MONOCHROME1 and MONOCHROME2 decoder
+static int decode_mono( AVCodecContext *avctx, 
+                        const uint8_t *buf,
+                        uint8_t *out)
+{
+    int bitmask, window, level, bitsalloc, pixrep, type = 0x02;
+    uint64_t i, size;
+    int64_t pix;
 
-        if (val > max) {
-            ptr[i] = 255;
-        } else if (val < min) {
-            ptr[i] = 0;
-        } else {
-            ptr[i] = ((val & bitmask) - min) * 255 / (max - min);
-        }
+    window = avctx->profile;
+    level = avctx->level;
+    size = avctx->width * avctx->height;
+    bitsalloc = avctx->bits_per_raw_sample;
+    bitmask = (1 << avctx->bits_per_coded_sample) - 1;
+    pixrep = 1;
+
+    switch (bitsalloc) {
+        case 1:
+        case 8:
+            for (i = 0; i < size; i++) {
+                if (pixrep)
+                    pix = (int8_t)bytestream_get_byte(&buf);
+                else
+                    pix = (uint8_t)bytestream_get_byte(&buf);
+                out[i] = apply_window_level(pix, window, level, bitmask, type);
+            }
+            break;
+        case 16:
+            for (i = 0; i < size; i++) {
+                if (pixrep)
+                    pix = (int16_t)bytestream_get_le16(&buf);
+                else
+                    pix = (uint16_t)bytestream_get_le16(&buf);
+                out[i] = apply_window_level(pix, window, level, bitmask, type);
+            }
+            break;
+        case 32:
+            for (i = 0; i < size; i++) {
+                if (pixrep)
+                    pix = (int32_t)bytestream_get_le32(&buf);
+                else
+                    pix = (uint32_t)bytestream_get_le32(&buf);
+                out[i] = apply_window_level(pix, window, level, bitmask, type);
+            }
+            break;
+        default:
+            av_log(avctx, AV_LOG_ERROR, "Bits allocated %d not supported\n", bitsalloc);
+            return AVERROR_INVALIDDATA;
     }
-    return;
-
+    return 0;
 }
 
 static int dicom_decode_frame(AVCodecContext *avctx,
@@ -57,29 +104,31 @@ static int dicom_decode_frame(AVCodecContext *avctx,
     const uint8_t *buf = avpkt->data;
     int buf_size       = avpkt->size;
     AVFrame *p         = data;
-    short *vals;
-    int width;
-    int height;
+    int ret, req_buf_size, photo_interpret = 0x01;
     uint8_t *ptr;
-    int ret, bitmask, window, level;
 
-    width = avctx->width;
-    height = avctx->height;
-    window = avctx->profile;
-    level = avctx->level;
     avctx->pix_fmt = AV_PIX_FMT_GRAY8;
     if ((ret = ff_get_buffer(avctx, p, 0)) < 0)
         return ret;
     p->pict_type = AV_PICTURE_TYPE_I;
     p->key_frame = 1;
-
-    vals = (short *) buf;
-    bitmask = (1 << 16) - 1;
-
-    ptr      = p->data[0];
-
-    apply_window_level(vals, ptr, window, level, bitmask, width * height);
-
+    req_buf_size = avctx->width * avctx->height * avctx->bits_per_raw_sample / 8;
+    ptr = p->data[0];
+    if (buf_size < req_buf_size) {
+        av_log(avctx, AV_LOG_ERROR, "Required buffer size is %d but recieved only %d\n", req_buf_size, buf_size);
+        return AVERROR_INVALIDDATA;
+    }
+    switch (photo_interpret) {
+        case 0x01: // MONOCHROME1
+        case 0x02: // MONOCHROME2
+            ret = decode_mono(avctx, buf, ptr);
+            if (ret < 0)
+                return ret;
+            break;
+        default:
+            av_log(avctx, AV_LOG_ERROR, "Provided photometric interpretation not supported\n");
+            return AVERROR_INVALIDDATA;
+    }
     *got_frame = 1;
     return buf_size;
 }
