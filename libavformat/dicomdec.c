@@ -56,6 +56,24 @@ static int dicom_probe(const AVProbeData *p)
     return 0;
 }
 
+static DataElement *alloc_de() {
+    DataElement *de = (DataElement *) av_malloc(sizeof(DataElement));
+    de->is_found = 0;
+    de->desc = NULL;
+    de->bytes = NULL;
+    return de;
+}
+
+static void free_de(DataElement *de) {
+    if (!de)
+        return;
+    if (de->bytes)
+        av_free(de->bytes);
+    if (de->desc)
+        av_free(de->desc);
+    av_free(de);
+}
+
 static int set_imagegroup_data(AVFormatContext *s, AVStream* st, DataElement *de)
 {
     DICOMContext *dicom = s->priv_data;
@@ -108,8 +126,6 @@ static int set_imagegroup_data(AVFormatContext *s, AVStream* st, DataElement *de
     return 0;
 }
 
-
-
 static int read_data_element_metainfo(AVFormatContext *s, DataElement *de)
 {
     DICOMContext *dicom = s->priv_data;
@@ -147,16 +163,14 @@ static int read_data_element_metainfo(AVFormatContext *s, DataElement *de)
             avio_skip(s->pb, 2); // Padding always 0x0000
             de->VL = avio_rl32(s->pb);
             bytes_read += 6;
-            if (de->VL % 2)
-                av_log(s, AV_LOG_WARNING,"Data Element Value length:%d can't be odd\n", de->VL);
             break;
         default:
             de->VL = avio_rl16(s->pb);
             bytes_read += 2;
-            if (de->VL % 2)
-                av_log(s, AV_LOG_WARNING,"Data Element Value length:%d can't be odd\n", de->VL);
             break;
     }
+    if (de->VL % 2)
+        av_log(s, AV_LOG_WARNING,"Data Element Value length:%d can't be odd\n", de->VL);
     return bytes_read;
 }
 
@@ -180,7 +194,7 @@ static char *get_key_str(DataElement *de) {
 
 static char *get_val_str(DataElement *de) {
     char *val;
-    
+
     switch(de->VR) {
         case AT:
         case OB:
@@ -189,11 +203,11 @@ static char *get_val_str(DataElement *de) {
         case OL:
         case OV:
         case OW:
-            val = "[Binary data]";
+            val = av_strdup("[Binary data]");
             break;
         case UN:
         case SQ:
-            val = "[Sequence of items]";
+            val = av_strdup("[Sequence of items]");
             break;
         case FL:
             val = (char *) av_malloc(10);
@@ -261,35 +275,42 @@ static int dicom_read_header(AVFormatContext *s)
     ret = avio_skip(pb, DICOM_PREAMBLE_SIZE + DICOM_PREFIX_SIZE);
     if (ret < 0)
         return ret;
-    de = av_malloc(sizeof(DataElement));
+    de = alloc_de();
     ret = read_data_element_metainfo(s, de);
     ret = read_data_element_valuefield(s, de);
-    if (ret < 0)
+    if (ret < 0) {
+        free_de(de);
         return ret;
+    }
     if (de->GroupNumber != 0x02 || de->ElementNumber != 0x00) {
         av_log(s, AV_LOG_WARNING,"First data element is not \'File MetaInfo Group Length\'");
         header_size = 200; // Fallback to default length
     } else {
         header_size = *(uint32_t *)de->bytes;
     }
+    free_de(de);
     while(bytes_read < header_size) {
-        de = av_malloc(sizeof(DataElement));
+        de = alloc_de();
         ret = read_data_element_metainfo(s, de);
-        if (ret < 0)
+        if (ret < 0) {
+            free_de(de);
             return ret;
+        }
         bytes_read += ret;
         dicom_dict_find_elem_info(de);
         key = get_key_str(de);
         ret = read_data_element_valuefield(s, de);
-        if (ret < 0)
+        if (ret < 0) {
+            free_de(de);
             return ret;
+        }
         bytes_read += ret;
         value = get_val_str(de);
         if (de->GroupNumber == TS_GR_NB && de->ElementNumber == TS_EL_NB) {
             dicom->transfer_syntax = get_transfer_sytax(value);
         }
         av_dict_set(m, key, value, AV_DICT_DONT_STRDUP_KEY | AV_DICT_DONT_STRDUP_VAL);
-        av_free(de);
+        free_de(de);
     }
     s->ctx_flags |= AVFMTCTX_NOHEADER;
     s->start_time = 0;
@@ -310,12 +331,10 @@ static int dicom_read_packet(AVFormatContext *s, AVPacket *pkt)
             return AVERROR(ENOMEM);
         st->codecpar->codec_id = AV_CODEC_ID_DICOM;
         st->codecpar->codec_type = AVMEDIA_TYPE_VIDEO;
-        if (st->codecpar->profile != -1) {
+        if (st->codecpar->profile != -1)
             st->codecpar->profile = dicom->window;
-        }
-        if (st->codecpar->level != -1) {
+        if (st->codecpar->level != -1)
             st->codecpar->level = dicom->level;
-        }
     } else
         st = s->streams[0];
 
@@ -324,15 +343,15 @@ static int dicom_read_packet(AVFormatContext *s, AVPacket *pkt)
         if (ret)
             return AVERROR_EOF;
 
-        de = av_malloc(sizeof(DataElement));
+        de = alloc_de();
         ret = read_data_element_metainfo(s,de);
         if (ret < 0)
-            return ret;
+            goto exit;
 
         if (de->GroupNumber == IMAGE_GR_NB) {
             ret = read_data_element_valuefield(s, de);
             if (ret < 0)
-                return ret;
+                goto exit;
             set_imagegroup_data(s, st, de);
         } else if (de->GroupNumber == PIXEL_GR_NB && de->ElementNumber == PIXELDATA_EL_NB) {
             if (av_new_packet(pkt, de->VL) < 0)
@@ -341,20 +360,25 @@ static int dicom_read_packet(AVFormatContext *s, AVPacket *pkt)
             pkt->stream_index = 0;
             pkt->size = de->VL;
             ret = avio_read(s->pb, pkt->data, de->VL);
-            if (ret < 0)
+            if (ret < 0) {
                 av_packet_unref(pkt);
+                goto exit;
+            }
             return ret;
         }
         else {
             ret = read_data_element_valuefield(s, de);
             if (ret < 0)
-                return ret;
+                goto exit;
         }
         if (metadata) {
-            
         }
-        av_free(de);
+        free_de(de);
     }
+exit:
+    free_de(de);
+    if (ret < 0)
+        return ret;
     return AVERROR_EOF;
 }
 

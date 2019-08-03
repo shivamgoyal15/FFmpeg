@@ -21,15 +21,24 @@
  */
 
 #include "libavutil/avstring.h"
+#include "libavutil/mem.h"
 #include "dicom.h"
 
 typedef struct DICOMDictionary {
     uint16_t GroupNumber;
     uint16_t ElementNumber;
     ValueRepresentation vr;
-    char *desc;
+    const char *desc;
 } DICOMDictionary;
 
+/**
+ * dicom_dictionary[] to store dicom tags value rep
+ * and desc.
+ * 
+ * On adding new data elements to dicom_dictionary[]
+ * always keep them in ascending order of GroupNumber
+ * and ElementNumber
+*/
 DICOMDictionary dicom_dictionary[] = {
     {0x0002, 0x0000, UL, "File Meta Elements Group Len"},
     {0x0002, 0x0001, OB, "File Meta Information Version"},
@@ -649,19 +658,30 @@ DICOMDictionary dicom_dictionary[] = {
     {0x0028, 0x9506, US, "Pixel Shift Frame Range"},
     {0x0028, 0x9507, US, "LUT Frame Range"},
     {0x0028, 0x9520, DS, "Image To Equipment Mapping Matrix"},
-    {0x0028, 0x9537, CS, "Equipment Coordinate System Identification"},
+    {0x0028, 0x9537, CS, "Equipment Coordinate System Identification"}
+
+    // Multiframe , Cine Module
+
 };
 
 int dicom_dict_find_elem_info(DataElement *de) {
-    int i, len;
+    int len;
 
     if (!de->GroupNumber || !de->ElementNumber)
         return -2;
     len = sizeof(dicom_dictionary) / sizeof(dicom_dictionary[0]);
     for (int i = 0; i < len; i++) {
+        if (dicom_dictionary[i].GroupNumber >= de->GroupNumber
+            && dicom_dictionary[i].ElementNumber > de->ElementNumber) {
+            de->is_found = 0;
+            return -1;
+        }
+
         if (de->GroupNumber == dicom_dictionary[i].GroupNumber
             && de->ElementNumber == dicom_dictionary[i].ElementNumber) {
             de->VR = dicom_dictionary[i].vr;
+            de->desc = av_strdup(dicom_dictionary[i].desc);
+            de->is_found = 1;
             return 0;
         }
     }
