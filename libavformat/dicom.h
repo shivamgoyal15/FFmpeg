@@ -22,15 +22,25 @@
 
 
 #define DICOM_PREAMBLE_SIZE 128
-#define DICOM_PREFIX_SIZE 4
+#define DICOM_PREFIX_SIZE   4
 
-#define IMAGE_GR_NB 0x0028
-#define PIXEL_GR_NB 0x7FE0
+#define IMAGE_GR_NB     0x0028
+#define MF_GR_NB        0x0018
+#define PIXEL_GR_NB     0x7FE0
 #define PIXELDATA_EL_NB 0x0010
-#define TS_GR_NB 0x0002
-#define TS_EL_NB 0x0010
-#define DEFAULT_WINDOW 1100
-#define DEFAULT_LEVEL 125
+#define TS_GR_NB        0x0002
+#define TS_EL_NB        0x0010
+#define UNDEFINED_VL    0xFFFFFFFF
+#define DEFAULT_WINDOW  1100
+#define DEFAULT_LEVEL   125
+#define DECODER_ED_SIZE 20
+
+#define SEQ_GR_NB           0xFFFE
+#define SEQ_DEL_EL_NB       0xE0DD
+#define SEQ_ITEM_BEG_EL_NB  0xE000
+#define SEQ_ITEM_DEL_EL_NB  0xE00D
+#define MAX_UNDEF_LENGTH    5000   // max undefined length
+#define MAX_SEQ_LENGTH      20     // max sequence length (items)
 
 typedef enum {
     UNSUPPORTED_TS = 0,
@@ -86,14 +96,14 @@ typedef enum {
 } ValueRepresentation;
 
 
-typedef struct DataElement{
+typedef struct DataElement {
     uint16_t GroupNumber;
     uint16_t ElementNumber;
     ValueRepresentation VR;
-    uint32_t VL;
-    void* bytes;
-    int index;  // Index in dicom dictionary
-    char* desc;
+    int64_t VL;
+    void *bytes;
+    int is_found; // is found in DICOM dictionary
+    char *desc; // description (from dicom dictionary)
 } DataElement;
 
 int dicom_dict_find_elem_info (DataElement *de);

@@ -34,7 +34,7 @@ typedef struct DICOMDictionary {
 /**
  * dicom_dictionary[] to store dicom tags value rep
  * and desc.
- * 
+ *
  * On adding new data elements to dicom_dictionary[]
  * always keep them in ascending order of GroupNumber
  * and ElementNumber
@@ -266,6 +266,23 @@ DICOMDictionary dicom_dictionary[] = {
     {0x0008, 0x9458, SQ, "Frame Display Sequence"},
     {0x0008, 0x9459, FL, "Recommended DisplayFrame Rate in Float"},
     {0x0008, 0x9460, CS, "Skip Frame Range Flag"},
+
+    // Group Number 0x0010, Patient's Info (incomplete / only main elems)
+    {0x0010, 0x0010, PN, "Patient's Name"},
+    {0x0010, 0x0020, LO, "Patient ID"},
+    {0x0010, 0x0021, LO, "Issuer of Patient ID"},
+    {0x0010, 0x0022, CS, "Type of Patient ID"},
+    {0x0010, 0x0024, SQ, "Issuer of Patient ID Qualifiers Sequence"},
+    {0x0010, 0x0026, SQ, "Source Patient Group Identification Sequence"},
+    {0x0010, 0x0027, SQ, "Group of Patients Identification Sequence"},
+    {0x0010, 0x0028, US, "Subject Relative Position in Image"},
+    {0x0010, 0x0038, DA, "Patient's Birth Date"},
+    {0x0010, 0x0032, TM, "Patient's Birth Time"},
+    {0x0010, 0x0033, LO, "Patient's Birth Date in Alternative Calendar"},
+    {0x0010, 0x0034, LO, "Patient's Death Date in Alternative Calendar"},
+    {0x0010, 0x0035, CS, "Patient's Alternative Calendar"},
+    {0x0010, 0x0040, CS, "Patient's Sex"},
+    {0x0010, 0x0050, SQ, "Patient's Insurance PlanCode Sequence"},
 
     // Group Number 0x0028, Image Group Number
     {0x0028, 0x0002, US, "Samples per Pixel"},
@@ -659,31 +676,36 @@ DICOMDictionary dicom_dictionary[] = {
     {0x0028, 0x9507, US, "LUT Frame Range"},
     {0x0028, 0x9520, DS, "Image To Equipment Mapping Matrix"},
     {0x0028, 0x9537, CS, "Equipment Coordinate System Identification"}
-
-    // Multiframe , Cine Module
-
 };
+
+static int dcm_dict_comp(const void *vde, const void *vDd) {
+    int ret;
+    DataElement *de = (DataElement *) vde;
+    DICOMDictionary *Dd = (DICOMDictionary *) vDd;
+
+    ret = FFDIFFSIGN(de->GroupNumber, Dd->GroupNumber);
+    if (!ret)
+        ret = FFDIFFSIGN(de->ElementNumber, Dd->ElementNumber);
+    return ret;
+}
 
 int dicom_dict_find_elem_info(DataElement *de) {
     int len;
+    DICOMDictionary *out;
 
     if (!de->GroupNumber || !de->ElementNumber)
-        return -2;
-    len = sizeof(dicom_dictionary) / sizeof(dicom_dictionary[0]);
-    for (int i = 0; i < len; i++) {
-        if (dicom_dictionary[i].GroupNumber >= de->GroupNumber
-            && dicom_dictionary[i].ElementNumber > de->ElementNumber) {
-            de->is_found = 0;
-            return -1;
-        }
+        return -1;
+    len = FF_ARRAY_ELEMS(dicom_dictionary);
 
-        if (de->GroupNumber == dicom_dictionary[i].GroupNumber
-            && de->ElementNumber == dicom_dictionary[i].ElementNumber) {
-            de->VR = dicom_dictionary[i].vr;
-            de->desc = av_strdup(dicom_dictionary[i].desc);
-            de->is_found = 1;
-            return 0;
-        }
-    }
-    return -1;
+    out = (DICOMDictionary *) bsearch(de, &dicom_dictionary, len,
+                                      sizeof(dicom_dictionary[0]), dcm_dict_comp);
+
+    if (!out)
+        return -1;
+    de->VR = out->vr;
+    de->desc = av_strdup(out->desc);
+    if (!de->desc)
+        return AVERROR(ENOMEM);
+    de->is_found = 1;
+    return 0;
 }
