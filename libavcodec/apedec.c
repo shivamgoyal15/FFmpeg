@@ -589,7 +589,7 @@ static void decode_array_0000(APEContext *ctx, GetBitContext *gb,
                               int32_t *out, APERice *rice, int blockstodecode)
 {
     int i;
-    int ksummax, ksummin;
+    unsigned ksummax, ksummin;
 
     rice->ksum = 0;
     for (i = 0; i < FFMIN(blockstodecode, 5); i++) {
@@ -836,7 +836,7 @@ static av_always_inline int filter_fast_3320(APEPredictor *p,
     else
         p->coeffsA[filter][0]--;
 
-    p->filterA[filter] += p->lastA[filter];
+    p->filterA[filter] += (unsigned)p->lastA[filter];
 
     return p->filterA[filter];
 }
@@ -1451,7 +1451,8 @@ static int ape_decode_frame(AVCodecContext *avctx, void *data,
         if (s->fileversion >= 3900) {
             if (offset > 3) {
                 av_log(avctx, AV_LOG_ERROR, "Incorrect offset passed\n");
-                s->data = NULL;
+                av_freep(&s->data);
+                s->data_size = 0;
                 return AVERROR_INVALIDDATA;
             }
             if (s->data_end - s->ptr < offset) {

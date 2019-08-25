@@ -526,6 +526,8 @@ static int vc1_decode_ac_coeff(VC1Context *v, int *last, int *skip,
         int escape = decode210(gb);
         if (escape != 2) {
             index = get_vlc2(gb, ff_vc1_ac_coeff_table[codingset].table, AC_VLC_BITS, 3);
+            if (index < 0)
+                return AVERROR_INVALIDDATA;
             run   = vc1_index_decode_table[codingset][index][0];
             level = vc1_index_decode_table[codingset][index][1];
             lst   = index >= vc1_last_decode_table[codingset];
@@ -1376,7 +1378,7 @@ static int vc1_decode_p_mb(VC1Context *v)
                     v->vc1dsp.vc1_inv_trans_8x8(v->block[v->cur_blk_idx][block_map[i]]);
                     if (v->rangeredfrm)
                         for (j = 0; j < 64; j++)
-                            v->block[v->cur_blk_idx][block_map[i]][j] <<= 1;
+                            v->block[v->cur_blk_idx][block_map[i]][j] *= 2;
                     block_cbp   |= 0xF << (i << 2);
                     block_intra |= 1 << i;
                 } else if (val) {
@@ -2600,13 +2602,13 @@ static void vc1_decode_i_blocks(VC1Context *v)
                 if (v->rangeredfrm)
                     for (k = 0; k < 6; k++)
                         for (j = 0; j < 64; j++)
-                            v->block[v->cur_blk_idx][block_map[k]][j] <<= 1;
+                            v->block[v->cur_blk_idx][block_map[k]][j] *= 2;
                 vc1_put_blocks_clamped(v, 1);
             } else {
                 if (v->rangeredfrm)
                     for (k = 0; k < 6; k++)
                         for (j = 0; j < 64; j++)
-                            v->block[v->cur_blk_idx][block_map[k]][j] = (v->block[v->cur_blk_idx][block_map[k]][j] - 64) << 1;
+                            v->block[v->cur_blk_idx][block_map[k]][j] = (v->block[v->cur_blk_idx][block_map[k]][j] - 64) * 2;
                 vc1_put_blocks_clamped(v, 0);
             }
 
